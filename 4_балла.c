@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     char *input_file = argv[1];
     char *output_file = argv[2];
 
-    //Создание pipe
+    //Создание неименованных каналов
     int pipe1[2], pipe2[2];
     if (pipe(pipe1) < 0 || pipe(pipe2) < 0) {
         perror("pipe");
@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    //Закрываем все pipe в родительском процессе
+    //Закрываем все каналы в родительском процессе
     close(pipe1[0]);
     close(pipe1[1]);
     close(pipe2[0]);
