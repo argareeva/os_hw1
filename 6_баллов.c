@@ -16,6 +16,7 @@ int main(int argc, char *argv[]) {
     // Аргументы командной строки
     char *input_file = argv[1];
     char *output_file = argv[2];
+    pid_t pid1, pid2;
 
     // Создание неименованных каналов
     int pipe1[2], pipe2[2];
@@ -25,7 +26,10 @@ int main(int argc, char *argv[]) {
     }
 
     //Разветвляем первый дочерний процесс для чтения из входного файла и записи в канал
-    if (fork() == 0) {
+    if ((pid1 = fork()) == -1) {
+        perror("fork");
+        return 1;
+    } else if (pid1 == 0) {
         close(pipe1[0]);
 
         int fd = open(input_file, O_RDONLY);
@@ -43,7 +47,10 @@ int main(int argc, char *argv[]) {
 
     //Разветвляем второй дочерний процесс для чтения из 1 канала
     //Результат обработки передаем обратно 1 процессу через неименованный канал
-    if (fork() == 0) {
+    if ((pid2 = fork()) == -1) {
+        perror("fork");
+        return 1;
+    } else if (pid2 == 0) {
         close(pipe1[1]);
         close(pipe2[0]);
 
@@ -93,9 +100,9 @@ int main(int argc, char *argv[]) {
     close(pipe2[0]);
 
     //Завершение всех дочерних процессов
-    for (int i = 0; i < 2; ++i) {
-        wait(NULL);
-    }
-
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
+    wait(NULL);
+    
     return 0;
 }
