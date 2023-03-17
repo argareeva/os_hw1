@@ -19,24 +19,9 @@ int main(int argc, char *argv[]) {
     char *input_file = argv[1];
     char *output_file = argv[2];
 
+    int fd1, fd2, fd3;
     pid_t pid;
-    char buffer[BUFSIZE], output_buffer[BUFSIZE];
-    int fd1, fd2, pipe1, pipe2;
-    int bytes_read, bytes_written;
-
-    //Открываем входной файл и записываем его содержимое в буфер
-    if ((fd1 = open(input_file, O_RDONLY)) == -1) {
-        perror("open");
-        return 1;
-    }
-    if ((bytes_read = read(fd1, buffer, BUFSIZE)) == -1) {
-        perror("read");
-        close(fd1);
-        return 1;
-    }
-    buffer[bytes_read] = '\0';
-    close(fd1);
-
+    
     //Создание 1 именованного канала
     if (mkfifo("pipe1", 0666) == -1) {
         perror("mkfifo");
@@ -48,97 +33,105 @@ int main(int argc, char *argv[]) {
         perror("mkfifo");
         return 1;
     }
-
+    
     if ((pid = fork()) == -1) {
         perror("fork");
         return 1;
-    }
-    else if (pid == 0) {
-
-        //Чтение данных из 1 именованного канала
-        if ((pipe1 = open("pipe1", O_RDONLY)) == -1) {
+    } else if (pid == 0) {      //1 процесс
+        
+        //Открываем 1 канал для чтения
+         if ((fd1 = open("pipe1", O_RDONLY)) == -1) {
             perror("open");
             return 1;
         }
-        if ((bytes_read = read(pipe1, buffer, BUFSIZE)) == -1) {
-            perror("read");
-            close(pipe1);
+
+        //Открываем 2 канал для записи
+        if ((fd2 = open("pipe2", O_WRONLY)) == -1) {
+            perror("open");
             return 1;
         }
-        buffer[bytes_read] = '\0';
-        close(pipe1);
-
-        //цикл обработки первоначальной строки и записи новой строки в буфер
-        int i = 0, j = 0;
-        while (buffer[i] != '\0') {
-            if (isdigit(buffer[i])) {
-                while (isdigit(buffer[i])) {
-                    output_buffer[j++] = buffer[i++];
-                }
-                output_buffer[j++] = '+';
-            }
-            else {
-                i++;
+        char buf;
+        char num_buf[BUFSIZE];
+        int num_pos = 0;
+        //цикл обработки первоначальной строки из 1 канала и записи новой строки во 2 канал
+        while (read(fd1, &buf, 1) > 0) {
+            if (isdigit(buf)) {
+                num_buf[num_pos++] = buf;
+            } else if (num_pos > 0) {
+                num_buf[num_pos++] = '+';
+                write(fd2, num_buf, num_pos);
+                num_pos = 0;
             }
         }
-        output_buffer[j-1] = '\0';
 
-        //Запись данных из буфера во 2 именованный канал
-        if ((pipe2 = open("pipe2", O_WRONLY)) == -1) {
+        if (num_pos > 0) {
+            num_buf[num_pos++] = '+';
+            write(fd2, num_buf, num_pos);
+        }
+    
+        //Закрываем файловые дескрипторы
+        close(fd1);
+        close(fd2);
+        
+        unlink("pipe1");
+        unlink("pipe2");
+        
+    } else {      //2 процесс
+    
+        //Открываем 1 канал для записи
+        if ((fd1 = open("pipe1", O_WRONLY)) == -1) {
             perror("open");
             return 1;
         }
-        if ((bytes_written = write(pipe2, output_buffer, strlen(output_buffer))) == -1) {
-            perror("write");
-            close(pipe2);
-            return 1;
-        }
-        close(pipe2);
 
-        return 0;
-    }
-    else {
-        //Запись данных из буфера в 1 именованный канал
-        if ((pipe1 = open("pipe1", O_WRONLY)) == -1) {
+        //Открываем входной файл для чтения
+        if ((fd2 = open(input_file, O_RDONLY)) == -1) {
+            perror("open");
+            return 1;
+        }    
+        
+        char buf[BUFSIZE];
+        int n;
+        //Читаем из входного файла и записываем в 1 канал
+        while ((n = read(fd2, buf, BUFSIZE)) > 0) {
+            if (write(fd1, buf, n) == -1) {
+                perror("write");
+                return 1;
+            }
+        }
+        //Закрываем файловые дескрипторы
+        close(fd1);
+        close(fd2);
+        
+        buf[0] = '\0';
+        n = 0;
+        
+        //Открываем 2 канал для чтения
+        if ((fd1 = open("pipe2", O_RDONLY)) == -1) {
             perror("open");
             return 1;
         }
-        if ((bytes_written = write(pipe1, buffer, strlen(buffer))) == -1) {
-            perror("write");
-            close(pipe1);
-            return 1;
-        }
-        close(pipe1);
-
-        //Чтение обработанных данных из 2 именованного канала
-        if ((pipe2 = open("pipe2", O_RDONLY)) == -1) {
-            perror("open");
-            return 1;
-        }
-        if ((bytes_read = read(pipe2, output_buffer, BUFSIZE)) == -1) {
-            perror("read");
-            close(pipe2);
-            return 1;
-        }
-        output_buffer[bytes_read] = '\0';
-        close(pipe2);
-
-        //Запись обработанных данных в выходной файл
+        
+        //Открываем выходной файл для записи
         if ((fd2 = open(output_file, O_WRONLY | O_CREAT, 0666)) == -1) {
             perror("open");
             return 1;
         }
-        if ((bytes_written = write(fd2, output_buffer, strlen(output_buffer))) == -1) {
-            perror("write");
-            close(fd2);
-            return 1;
+        
+         //Читаем из 2 канала и записываем в выходной файл
+        while ((n = read(fd1, buf, BUFSIZE)) > 0) {
+            if (write(fd2, buf, n) == -1) {
+                perror("write");
+                return 1;
+            }
         }
-        close(fd2);
 
-        //Удаление именованных каналов
+        //Закрываем файловые дескрипторы
+        close(fd1);
+        close(fd2);
+        
         unlink("pipe1");
         unlink("pipe2");
-
-        return 0;
     }
+    return 0;
 }
